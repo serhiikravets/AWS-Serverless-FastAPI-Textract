@@ -1,0 +1,107 @@
+service: aws-serverless-fastapi-textract
+
+provider:
+  name: aws
+  region: eu-central-1
+  runtime: python3.9
+  environment:
+    FILES_TABLE: ${self:service}-FilesTable
+    BUCKET_NAME: ${self:custom.bucketName}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:Query
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: arn:aws:dynamodb:eu-central-1:851725658616:table/${self:service}-FilesTable
+        - Effect: Allow
+          Action:
+            - s3:ListObjects
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:PutObject
+          Resource: 
+            Fn::Join:
+              - ""
+              - - "arn:aws:s3:::"
+                - ${self:custom.bucketName}
+                - "/*"
+        - Effect: Allow
+          Action:
+            - textract:AnalyzeDocument
+          Resource: "*"
+
+functions:
+  api:
+    handler: app.handler
+    events:
+      - httpApi:
+          path: /
+          method: ANY
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+
+  processFile:
+    handler: process_file.process_file
+    environment:
+      FILES_TABLE: ${self:service}-FilesTable
+      BUCKET_NAME: ${self:custom.bucketName}
+    events:
+      - s3:
+          bucket: ${self:custom.bucketName}
+          event: s3:ObjectCreated:*
+          existing: true
+
+  makeCallback:
+    handler: make_callback.make_callback
+    environment:
+      FILES_TABLE: ${self:service}-FilesTable
+    events:
+      - stream:
+          type: dynamodb
+          arn:
+            Fn::GetAtt:
+              - FilesTable
+              - StreamArn
+
+resources:
+  Resources:
+    FilesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-FilesTable
+        AttributeDefinitions:
+          - AttributeName: file_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: file_id
+            KeyType: HASH
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
+        BillingMode: PAY_PER_REQUEST
+
+    FileBucket:
+      Type: AWS::S3::Bucket
+      Properties: {}
+      DeletionPolicy: Delete
+
+custom:
+  pythonRequirements:
+      useStaticCache: false
+      useDownloadCache: false
+      pipCmdExtraArgs:
+        - "--platform manylinux2014_x86_64"
+        - "--implementation cp" 
+        - "--python-version 3.9"
+        - "--only-binary=:all:"
+        - "--upgrade"
+  bucketName:
+    Ref: FileBucket
+
+plugins:
+  - serverless-python-requirements

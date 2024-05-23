@@ -1,0 +1,8 @@
+# Ignore Node.js modules
+/node_modules
+
+# Ignore Python virtual environment
+/venv
+
+# Ignore Serverless Framework generated files
+/.serverless
